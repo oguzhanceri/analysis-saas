@@ -1,18 +1,18 @@
 import { createAnalyzeJob, listAnalyzeJobs } from "@/lib/analyze-store";
 
 export async function GET() {
-  const jobs = listAnalyzeJobs().map((job) => ({
-    id: job.id,
-    url: job.url,
-    status: job.status,
-    progress: job.progress,
-    createdAt: job.createdAt,
-    overallScore: job.report?.overallScore ?? null,
-    scores: job.report?.scores ?? null,
-  }));
+  const jobs = await listAnalyzeJobs();
 
   return Response.json({
-    items: jobs,
+    items: jobs.map((job) => ({
+      id: job.id,
+      url: job.url,
+      status: job.status,
+      progress: job.progress,
+      createdAt: job.createdAt,
+      overallScore: job.report?.overallScore ?? null,
+      scores: job.report?.scores ?? null,
+    })),
   });
 }
 
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const job = createAnalyzeJob(normalizedUrl);
+  const job = await createAnalyzeJob(normalizedUrl);
 
   return Response.json(
     {
