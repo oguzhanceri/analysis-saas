@@ -36,6 +36,7 @@ type AnalyzeListItem = {
   progress: number;
   createdAt: number;
   overallScore: number | null;
+  isFallback: boolean;
   scores: {
     performance: number;
     ux: number;
@@ -251,14 +252,14 @@ function DashboardContent() {
   const stats = useMemo<DashboardStats>(() => {
     const completedJobs = jobs.filter((job) => job.status === "completed");
     const jobsWithScore = completedJobs.filter(
-      (job) => typeof job.overallScore === "number"
+      (job) => typeof job.overallScore === "number",
     );
 
     const average = (values: number[]) => {
       if (!values.length) return 0;
 
       return Math.round(
-        values.reduce((total, value) => total + value, 0) / values.length
+        values.reduce((total, value) => total + value, 0) / values.length,
       );
     };
 
@@ -270,17 +271,17 @@ function DashboardContent() {
       averageUx: average(
         completedJobs
           .map((job) => job.scores?.ux)
-          .filter((value): value is number => typeof value === "number")
+          .filter((value): value is number => typeof value === "number"),
       ),
       averageSeo: average(
         completedJobs
           .map((job) => job.scores?.seo)
-          .filter((value): value is number => typeof value === "number")
+          .filter((value): value is number => typeof value === "number"),
       ),
       averagePerformance: average(
         completedJobs
           .map((job) => job.scores?.performance)
-          .filter((value): value is number => typeof value === "number")
+          .filter((value): value is number => typeof value === "number"),
       ),
     };
   }, [jobs]);
@@ -607,8 +608,15 @@ function AiFlowCard({ jobs }: { jobs: AnalyzeListItem[] }) {
               </div>
 
               <p className="pl-5 text-[11px] font-medium leading-[1.45] text-[#a5afae]">
-                Skor: {job.overallScore ?? "-"} / 100 · Progress: %{job.progress}
+                Skor: {job.overallScore ?? "-"} / 100 · Progress: %
+                {job.progress}
               </p>
+
+              {job.isFallback && (
+                <span className="mt-3 ml-5 inline-flex rounded-xs border border-[#18dce9]/30 bg-[#12393b] px-2 py-1 font-mono text-[9px] font-bold tracking-[0.5px] text-[#18dce9]">
+                  FALLBACK RAPOR
+                </span>
+              )}
 
               <p className="mt-3 pl-5 font-mono text-[10px] font-bold text-[#737d7c]">
                 {formatTimeAgo(job.createdAt)}
@@ -636,7 +644,10 @@ function CompetitorCard() {
           RAKİP KARŞILAŞTIRMASI
         </h2>
 
-        <a href="#" className="text-[12px] font-bold tracking-[0.3px] text-[#75f8ff]">
+        <a
+          href="#"
+          className="text-[12px] font-bold tracking-[0.3px] text-[#75f8ff]"
+        >
           Detaylı Görünüm →
         </a>
       </div>
@@ -654,7 +665,9 @@ function CompetitorCard() {
         <tbody>
           {competitors.map((row, index) => (
             <tr key={row[0]} className="border-b border-white/3">
-              <td className={`py-4 ${index === 0 ? "text-[#77f8ff]" : "text-[#8e9998]"}`}>
+              <td
+                className={`py-4 ${index === 0 ? "text-[#77f8ff]" : "text-[#8e9998]"}`}
+              >
                 {index === 0 && (
                   <span className="mr-2 inline-block size-1.75 rounded-full bg-[#77f8ff]" />
                 )}
@@ -750,6 +763,11 @@ function AuditHistoryCard({
                       ? `Skor: ${job.overallScore ?? "-"} / 100 · Tamamlandı`
                       : `Devam Ediyor... ${job.progress}%`}
                   </p>
+                  {job.isFallback && (
+                    <span className="mt-2 inline-flex rounded-xs border border-[#18dce9]/30 bg-[#12393b] px-2 py-1 font-mono text-[9px] font-bold tracking-[0.5px] text-[#18dce9]">
+                      FALLBACK RAPOR
+                    </span>
+                  )}
                 </div>
 
                 <span className="shrink-0 font-mono text-[10px] font-bold text-[#717b7a]">
@@ -763,9 +781,17 @@ function AuditHistoryCard({
   );
 }
 
-function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
+function Panel({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <div className={`rounded-sm border border-white/10 bg-[#0f1111] p-5 ${className}`}>
+    <div
+      className={`rounded-sm border border-white/10 bg-[#0f1111] p-5 ${className}`}
+    >
       {children}
     </div>
   );
@@ -805,8 +831,17 @@ function formatTimeAgo(timestamp: number) {
 function BellIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <path d="M18 9A6 6 0 0 0 6 9C6 16 3 17 3 17H21S18 16 18 9Z" stroke="currentColor" strokeWidth="2" />
-      <path d="M10 21H14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M18 9A6 6 0 0 0 6 9C6 16 3 17 3 17H21S18 16 18 9Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M10 21H14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -814,8 +849,17 @@ function BellIcon() {
 function GearIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5A3.5 3.5 0 0 0 12 15.5Z" stroke="currentColor" strokeWidth="2" />
-      <path d="M19 13.5V10.5L16.8 10C16.6 9.4 16.4 8.9 16 8.4L17.2 6.4L15.1 4.3L13.1 5.5C12.6 5.3 12.1 5.1 11.5 5L11 3H8L7.5 5.2C6.9 5.4 6.4 5.6 5.9 6L3.9 4.8L1.8 6.9L3 8.9C2.8 9.4 2.6 9.9 2.5 10.5L0.5 11V14L2.7 14.5C2.9 15.1 3.1 15.6 3.5 16.1L2.3 18.1L4.4 20.2L6.4 19C6.9 19.2 7.4 19.4 8 19.5L8.5 21.5H11.5L12 19.3C12.6 19.1 13.1 18.9 13.6 18.5L15.6 19.7L17.7 17.6L16.5 15.6C16.7 15.1 16.9 14.6 17 14L19 13.5Z" stroke="currentColor" strokeWidth="1.4" transform="translate(2.25 0)" />
+      <path
+        d="M12 15.5A3.5 3.5 0 1 0 12 8.5A3.5 3.5 0 0 0 12 15.5Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M19 13.5V10.5L16.8 10C16.6 9.4 16.4 8.9 16 8.4L17.2 6.4L15.1 4.3L13.1 5.5C12.6 5.3 12.1 5.1 11.5 5L11 3H8L7.5 5.2C6.9 5.4 6.4 5.6 5.9 6L3.9 4.8L1.8 6.9L3 8.9C2.8 9.4 2.6 9.9 2.5 10.5L0.5 11V14L2.7 14.5C2.9 15.1 3.1 15.6 3.5 16.1L2.3 18.1L4.4 20.2L6.4 19C6.9 19.2 7.4 19.4 8 19.5L8.5 21.5H11.5L12 19.3C12.6 19.1 13.1 18.9 13.6 18.5L15.6 19.7L17.7 17.6L16.5 15.6C16.7 15.1 16.9 14.6 17 14L19 13.5Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        transform="translate(2.25 0)"
+      />
     </svg>
   );
 }
@@ -823,7 +867,11 @@ function GearIcon() {
 function HexIcon() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-      <path d="M8 3H16L21 12L16 21H8L3 12L8 3Z" stroke="currentColor" strokeWidth="2" />
+      <path
+        d="M8 3H16L21 12L16 21H8L3 12L8 3Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
     </svg>
   );
 }
@@ -831,10 +879,38 @@ function HexIcon() {
 function GridIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <rect x="4" y="4" width="6" height="6" stroke="currentColor" strokeWidth="2" />
-      <rect x="14" y="4" width="6" height="6" stroke="currentColor" strokeWidth="2" />
-      <rect x="4" y="14" width="6" height="6" stroke="currentColor" strokeWidth="2" />
-      <rect x="14" y="14" width="6" height="6" stroke="currentColor" strokeWidth="2" />
+      <rect
+        x="4"
+        y="4"
+        width="6"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <rect
+        x="14"
+        y="4"
+        width="6"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <rect
+        x="4"
+        y="14"
+        width="6"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <rect
+        x="14"
+        y="14"
+        width="6"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
     </svg>
   );
 }
@@ -842,7 +918,12 @@ function GridIcon() {
 function BrainIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M9 4C6.8 4 5 5.8 5 8C3.8 8.7 3 10 3 11.5C3 13 3.8 14.3 5 15C5 17.2 6.8 19 9 19M15 4C17.2 4 19 5.8 19 8C20.2 8.7 21 10 21 11.5C21 13 20.2 14.3 19 15C19 17.2 17.2 19 15 19M9 4V19M15 4V19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M9 4C6.8 4 5 5.8 5 8C3.8 8.7 3 10 3 11.5C3 13 3.8 14.3 5 15C5 17.2 6.8 19 9 19M15 4C17.2 4 19 5.8 19 8C20.2 8.7 21 10 21 11.5C21 13 20.2 14.3 19 15C19 17.2 17.2 19 15 19M9 4V19M15 4V19"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -850,8 +931,20 @@ function BrainIcon() {
 function ChartBoxIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <rect x="4" y="4" width="16" height="16" stroke="currentColor" strokeWidth="2" />
-      <path d="M8 16V12M12 16V8M16 16V10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <rect
+        x="4"
+        y="4"
+        width="16"
+        height="16"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M8 16V12M12 16V8M16 16V10"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -859,7 +952,11 @@ function ChartBoxIcon() {
 function TruckIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M3 7H15V17H3V7ZM15 10H19L21 13V17H15V10Z" stroke="currentColor" strokeWidth="2" />
+      <path
+        d="M3 7H15V17H3V7ZM15 10H19L21 13V17H15V10Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
       <circle cx="7" cy="18" r="1.5" fill="currentColor" />
       <circle cx="18" cy="18" r="1.5" fill="currentColor" />
     </svg>
@@ -869,7 +966,11 @@ function TruckIcon() {
 function ShieldIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 3L20 6V11C20 16 16.8 20 12 21C7.2 20 4 16 4 11V6L12 3Z" stroke="currentColor" strokeWidth="2" />
+      <path
+        d="M12 3L20 6V11C20 16 16.8 20 12 21C7.2 20 4 16 4 11V6L12 3Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
     </svg>
   );
 }
@@ -877,7 +978,12 @@ function ShieldIcon() {
 function UploadIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 19V5M12 5L7 10M12 5L17 10M5 21H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M12 19V5M12 5L7 10M12 5L17 10M5 21H19"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -886,7 +992,12 @@ function HelpIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-      <path d="M9.8 9A2.3 2.3 0 0 1 12 7.5C13.4 7.5 14.5 8.4 14.5 9.8C14.5 11.6 12 11.8 12 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M9.8 9A2.3 2.3 0 0 1 12 7.5C13.4 7.5 14.5 8.4 14.5 9.8C14.5 11.6 12 11.8 12 14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
       <circle cx="12" cy="17" r="1" fill="currentColor" />
     </svg>
   );
@@ -895,7 +1006,12 @@ function HelpIcon() {
 function LogoutIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M10 5H5V19H10M14 8L18 12L14 16M18 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M10 5H5V19H10M14 8L18 12L14 16M18 12H9"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -903,7 +1019,14 @@ function LogoutIcon() {
 function CalendarIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <rect x="4" y="5" width="16" height="15" stroke="currentColor" strokeWidth="2" />
+      <rect
+        x="4"
+        y="5"
+        width="16"
+        height="15"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
       <path d="M8 3V7M16 3V7M4 10H20" stroke="currentColor" strokeWidth="2" />
     </svg>
   );
@@ -912,7 +1035,12 @@ function CalendarIcon() {
 function ChevronDownIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <path d="M7 10L12 15L17 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M7 10L12 15L17 10"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -920,7 +1048,12 @@ function ChevronDownIcon() {
 function DownloadIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M12 4V15M12 15L8 11M12 15L16 11M5 20H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M12 4V15M12 15L8 11M12 15L16 11M5 20H19"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -928,7 +1061,12 @@ function DownloadIcon() {
 function PulseIcon() {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
-      <path d="M3 12H8L10 6L14 18L16 12H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M3 12H8L10 6L14 18L16 12H21"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -936,7 +1074,12 @@ function PulseIcon() {
 function TouchIcon() {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
-      <path d="M9 11V5A2 2 0 0 1 13 5V13M13 13L14 10A2 2 0 0 1 18 11L16 18C15.5 20 14 21 12 21H10C8 21 6.5 20 5.5 18L3 13A1.8 1.8 0 0 1 6.2 11.5L8 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M9 11V5A2 2 0 0 1 13 5V13M13 13L14 10A2 2 0 0 1 18 11L16 18C15.5 20 14 21 12 21H10C8 21 6.5 20 5.5 18L3 13A1.8 1.8 0 0 1 6.2 11.5L8 14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -945,7 +1088,12 @@ function SearchIcon() {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-      <path d="M16.5 16.5L21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M16.5 16.5L21 21"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -953,8 +1101,18 @@ function SearchIcon() {
 function SpeedIcon() {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
-      <path d="M5 16A7 7 0 0 1 19 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M12 16L16 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M5 16A7 7 0 0 1 19 16"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 16L16 11"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -962,7 +1120,11 @@ function SpeedIcon() {
 function AiIcon() {
   return (
     <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
-      <path d="M12 3L19 7V17L12 21L5 17V7L12 3Z" fill="currentColor" opacity="0.85" />
+      <path
+        d="M12 3L19 7V17L12 21L5 17V7L12 3Z"
+        fill="currentColor"
+        opacity="0.85"
+      />
     </svg>
   );
 }
@@ -970,7 +1132,12 @@ function AiIcon() {
 function RefreshIcon() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-      <path d="M20 12A8 8 0 1 1 17.7 6.4M20 4V10H14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M20 12A8 8 0 1 1 17.7 6.4M20 4V10H14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

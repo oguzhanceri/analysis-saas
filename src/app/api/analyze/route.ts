@@ -1,7 +1,11 @@
-import { createAnalyzeJob, listAnalyzeJobs } from "@/lib/analyze-store";
+import {
+  createAnalyzeJob,
+  listAnalyzeJobs,
+  type AnalyzeJob,
+} from "@/lib/analyze-store";
 
 export async function GET() {
-  const jobs = await listAnalyzeJobs();
+  const jobs: AnalyzeJob[] = await listAnalyzeJobs();
 
   return Response.json({
     items: jobs.map((job) => ({
@@ -12,6 +16,7 @@ export async function GET() {
       createdAt: job.createdAt,
       overallScore: job.report?.overallScore ?? null,
       scores: job.report?.scores ?? null,
+      isFallback: job.report ? isFallbackReport(job.report.findings) : false,
     })),
   });
 }
@@ -60,4 +65,23 @@ export async function POST(request: Request) {
       status: 201,
     }
   );
+}
+
+function isFallbackReport(
+  findings: {
+    title: string;
+    desc: string;
+  }[]
+) {
+  return findings.some((item) => {
+    const title = item.title.toLowerCase();
+    const desc = item.desc.toLowerCase();
+
+    return (
+      title.includes("fallback") ||
+      title.includes("pagespeed kotası") ||
+      desc.includes("fallback") ||
+      desc.includes("quota exceeded")
+    );
+  });
 }
