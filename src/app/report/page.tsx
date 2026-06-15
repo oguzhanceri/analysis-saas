@@ -306,14 +306,20 @@ function ReportContent({
     );
   }
 
+  const fallbackReport = isFallbackReport(report);
+
   return (
     <section className="bg-[#050707] px-11 py-8 max-lg:px-5">
       <div className="mx-auto max-w-325">
         <div className="mb-9 flex items-end justify-between gap-6 max-md:flex-col max-md:items-start">
           <div>
-            <div className="mb-4 flex items-center gap-3 font-mono text-[12px] font-bold tracking-[1.4px] text-[#ffb6ad]">
+            <div
+              className={`mb-4 flex items-center gap-3 font-mono text-[12px] font-bold tracking-[1.4px] ${
+                fallbackReport ? "text-[#18dce9]" : "text-[#ffb6ad]"
+              }`}
+            >
               <WarningIcon />
-              KRİTİK UYARI
+              {fallbackReport ? "FALLBACK RAPOR" : "KRİTİK UYARI"}
             </div>
 
             <h1 className="text-[44px] font-bold leading-none tracking-[-2px] text-[#f0eeee] max-md:text-[34px]">
@@ -338,6 +344,8 @@ function ReportContent({
           </div>
         </div>
 
+        {fallbackReport && <FallbackNotice />}
+
         <div className="grid grid-cols-[260px_1fr] gap-6 max-lg:grid-cols-1">
           <HealthScoreCard report={report} />
           <FindingsCard findings={report.findings} />
@@ -348,6 +356,45 @@ function ReportContent({
       </div>
     </section>
   );
+}
+
+function FallbackNotice() {
+  return (
+    <div className="mb-6 overflow-hidden rounded-md border border-[#18dce9]/30 bg-[#07191b]">
+      <div className="flex items-start gap-4 px-5 py-4 max-sm:flex-col">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xs bg-[#12393b] text-[#18dce9]">
+          <WarningIcon />
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <h2 className="font-mono text-[12px] font-bold tracking-[1.2px] text-[#18dce9]">
+            GERÇEK LIGHTHOUSE VERİSİ ALINAMADI
+          </h2>
+
+          <p className="mt-2 text-[14px] font-medium leading-normal text-[#b9c4c3]">
+            PageSpeed API kotası dolduğu veya API erişimi başarısız olduğu için
+            bu rapor geçici fallback verisiyle oluşturuldu. Geçerli bir
+            PageSpeed API key eklendiğinde sistem otomatik olarak gerçek
+            Lighthouse skorlarını kullanır.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isFallbackReport(report: ReportData) {
+  return report.findings.some((item) => {
+    const title = item.title.toLowerCase();
+    const desc = item.desc.toLowerCase();
+
+    return (
+      title.includes("fallback") ||
+      title.includes("pagespeed kotası") ||
+      desc.includes("fallback") ||
+      desc.includes("quota exceeded")
+    );
+  });
 }
 
 function HealthScoreCard({ report }: { report: ReportData }) {
