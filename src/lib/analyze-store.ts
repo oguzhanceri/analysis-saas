@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { createPageSpeedReport } from "@/lib/pagespeed";
 
 export type AnalyzeStatus = "queued" | "running" | "completed" | "failed";
 
@@ -96,6 +97,10 @@ export async function listAnalyzeJobs() {
 }
 
 async function updateJobProgress(job: AnalyzeJob) {
+  if (job.status === "failed") {
+    return job;
+  }
+
   const elapsed = Date.now() - job.createdAt;
   const progress = Math.min(100, Math.floor(elapsed / 120));
 
@@ -109,12 +114,28 @@ async function updateJobProgress(job: AnalyzeJob) {
     status = "completed";
   }
 
-  const logs = createLogs(job.url, progress);
+  let logs = createLogs(job.url, progress);
+  let report = job.report;
 
-  const report =
-    status === "completed"
-      ? job.report ?? createMockReport(job.id, job.url)
-      : job.report;
+  if (status === "completed" && !report) {
+    try {
+      logs = [...logs, "> PageSpeed Insights API verisi alınıyor..."];
+      report = await createPageSpeedReport(job.id, job.url);
+      logs = [...logs, "> Gerçek Lighthouse raporu oluşturuldu."];
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Bilinmeyen hata";
+
+      logs = [
+        ...logs,
+        `> PageSpeed Insights hatası: ${message}`,
+        "> Kota / API erişimi nedeniyle fallback rapor oluşturuldu.",
+      ];
+
+      report = createFallbackReport(job.id, job.url, message);
+      status = "completed";
+    }
+  }
 
   const updatedJob = await prisma.analyzeJob.update({
     where: {
@@ -167,17 +188,38 @@ function createLogs(url: string, progress: number) {
     `> Hedef belirlendi: ${url}`,
   ];
 
-  if (progress >= 15) logs.push("> SSL sertifika zinciri analiz ediliyor... [OK]");
-  if (progress >= 30) logs.push("> DOM yapısı analiz ediliyor... [204 düğüm haritalandı]");
-  if (progress >= 45) logs.push("> Core Web Vitals verileri hazırlanıyor...");
-  if (progress >= 60) logs.push("> Erişilebilirlik parametreleri değerlendiriliyor...");
-  if (progress >= 78) logs.push("> Derin AI sezgiselleri hesaplanıyor...");
-  if (progress >= 100) logs.push("> Analiz tamamlandı. Rapor oluşturuldu.");
+  if (progress >= 15) {
+    logs.push("> SSL sertifika zinciri analiz ediliyor... [OK]");
+  }
+
+  if (progress >= 30) {
+    logs.push("> DOM yapısı analiz ediliyor... [204 düğüm haritalandı]");
+  }
+
+  if (progress >= 45) {
+    logs.push("> Core Web Vitals verileri hazırlanıyor...");
+  }
+
+  if (progress >= 60) {
+    logs.push("> Erişilebilirlik parametreleri değerlendiriliyor...");
+  }
+
+  if (progress >= 78) {
+    logs.push("> Derin AI sezgiselleri hesaplanıyor...");
+  }
+
+  if (progress >= 100) {
+    logs.push("> Analiz tamamlandı. Rapor oluşturuluyor...");
+  }
 
   return logs;
 }
 
-function createMockReport(id: string, url: string): AnalyzeReport {
+function createFallbackReport(
+  id: string,
+  url: string,
+  errorMessage: string
+): AnalyzeReport {
   return {
     id,
     url,
@@ -191,18 +233,18 @@ function createMockReport(id: string, url: string): AnalyzeReport {
     },
     findings: [
       {
-        title: "Ana İplik (Main Thread) Bloklanması",
-        desc: "Ağır JavaScript yürütümü nedeniyle kaydırma sırasında TBT değeri yükseldi.",
-        tag: "Kritik",
-      },
-      {
-        title: "Mobil Dokunmatik Hedefleri Çok Küçük",
-        desc: "Navigasyon menüsündeki linkler erişilebilirlik standartlarını tam karşılamıyor.",
+        title: "PageSpeed kotası doldu",
+        desc: `Gerçek Lighthouse analizi alınamadı. Sistem fallback rapor oluşturdu. Hata: ${errorMessage}`,
         tag: "Uyarı",
       },
       {
-        title: "Görsel Optimizasyon Eksikliği",
-        desc: "Hero görseli yeni nesil formatlarda sunulmuyor.",
+        title: "Fallback performans raporu",
+        desc: "Bu rapor geçici demo verisiyle oluşturuldu. PageSpeed API key eklendiğinde gerçek skorlar üretilecektir.",
+        tag: "Bilgi",
+      },
+      {
+        title: "API key önerilir",
+        desc: "Daha stabil analiz için Google PageSpeed Insights API key eklenmelidir.",
         tag: "Bilgi",
       },
     ],
@@ -210,22 +252,22 @@ function createMockReport(id: string, url: string): AnalyzeReport {
       {
         metric: "LCP (Largest Contentful Paint)",
         ours: "3.2s",
-        average: "2.5s",
-        leader: "1.8s",
+        average: "≤ 2.5s",
+        leader: "≤ 1.8s",
         status: "warning",
       },
       {
-        metric: "FID (First Input Delay)",
-        ours: "85ms",
-        average: "100ms",
-        leader: "70ms",
-        status: "success",
+        metric: "TBT (Total Blocking Time)",
+        ours: "240ms",
+        average: "≤ 200ms",
+        leader: "≤ 100ms",
+        status: "warning",
       },
       {
         metric: "CLS (Cumulative Layout Shift)",
         ours: "0.04",
-        average: "0.15",
-        leader: "0.02",
+        average: "≤ 0.10",
+        leader: "≤ 0.05",
         status: "success",
       },
     ],
