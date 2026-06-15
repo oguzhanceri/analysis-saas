@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 const topNav = [
   { title: "Dashboard", href: "/dashboard" },
@@ -33,6 +37,14 @@ const modules = [
     icon: <BoltIcon />,
   },
 ];
+
+type AnalyzeResponse = {
+  jobId?: string;
+  url?: string;
+  status?: string;
+  progress?: number;
+  message?: string;
+};
 
 export default function ScannerPage() {
   return (
@@ -177,8 +189,58 @@ function ScannerContent() {
 }
 
 function ScanCard() {
+  const router = useRouter();
+
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (isSubmitting) return;
+
+    setError("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: url.trim(),
+        }),
+      });
+
+      const data = (await response.json()) as AnalyzeResponse;
+
+      if (!response.ok) {
+        setError(data.message || "Analiz başlatılamadı.");
+        return;
+      }
+
+      if (!data.jobId || !data.url) {
+        setError("Analiz kimliği alınamadı.");
+        return;
+      }
+
+      router.push(
+        `/loading?jobId=${data.jobId}&url=${encodeURIComponent(data.url)}`
+      );
+    } catch {
+      setError("Sunucuya bağlanırken bir hata oluştu.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
-    <form action="/loading" method="GET" className="mt-14 rounded-[7px] border border-white/10 bg-[#0a0c0c]/95 p-8 shadow-[0_0_90px_rgba(19,255,255,0.06)] max-md:p-5">
+    <form
+      onSubmit={handleSubmit}
+      className="mt-14 rounded-[7px] border border-white/10 bg-[#0a0c0c]/95 p-8 shadow-[0_0_90px_rgba(19,255,255,0.06)] max-md:p-5"
+    >
       <div>
         <label className="mb-3 block font-mono text-[14px] font-bold tracking-[0.8px] text-[#12dce8]">
           HEDEF URL
@@ -186,14 +248,23 @@ function ScanCard() {
 
         <div className="flex h-14 items-center gap-4 rounded-sm border border-white/10 bg-[#242424] px-5">
           <GlobeIcon />
+
           <input
             name="url"
             type="url"
             required
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
             placeholder="https://"
             className="h-full w-full bg-transparent font-mono text-[18px] font-bold text-white outline-none placeholder:text-[#727987]"
           />
         </div>
+
+        {error && (
+          <p className="mt-3 font-mono text-[13px] font-bold text-[#ffaaa4]">
+            {error}
+          </p>
+        )}
       </div>
 
       <div className="my-8 h-px w-full bg-white/10" />
@@ -211,9 +282,13 @@ function ScanCard() {
       <div className="my-9 h-px w-full bg-white/10" />
 
       <div className="flex justify-end">
-        <button type="submit" className="flex h-12.25 min-w-53.75 items-center justify-center gap-3 rounded-[5px] bg-linear-to-r from-[#16dff0] to-[#5734d9] px-7 text-[14px] font-bold tracking-[0.8px] text-white transition hover:brightness-110">
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="flex h-12.25 min-w-53.75 items-center justify-center gap-3 rounded-[5px] bg-linear-to-r from-[#16dff0] to-[#5734d9] px-7 text-[14px] font-bold tracking-[0.8px] text-white transition hover:brightness-110 disabled:pointer-events-none disabled:opacity-60"
+        >
           <PlayIcon />
-          ANALİZİ BAŞLAT
+          {isSubmitting ? "BAŞLATILIYOR..." : "ANALİZİ BAŞLAT"}
         </button>
       </div>
     </form>

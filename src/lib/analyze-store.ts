@@ -73,6 +73,12 @@ export function getAnalyzeJob(id: string) {
   return updateJobProgress(job);
 }
 
+export function listAnalyzeJobs() {
+  return Array.from(analyzeJobs.values())
+    .map((job) => updateJobProgress(job))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
 function updateJobProgress(job: AnalyzeJob) {
   const elapsed = Date.now() - job.createdAt;
   const progress = Math.min(100, Math.floor(elapsed / 120));
