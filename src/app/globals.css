@@ -84,3 +84,38 @@ body {
 .scanner-gear {
   animation: soft-pulse 2s ease-in-out infinite;
 }
+
+
+@media print {
+  body {
+    background: #050707 !important;
+  }
+
+  header,
+  aside,
+  button,
+  nav {
+    display: none !important;
+  }
+
+  main {
+    background: #050707 !important;
+  }
+
+  section {
+    padding: 0 !important;
+  }
+
+  * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .print\:block {
+    display: block !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+}

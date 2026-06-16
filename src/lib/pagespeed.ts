@@ -103,32 +103,65 @@ function toPercent(score: number | null | undefined) {
 }
 
 function createFindings(audits: Record<string, PageSpeedAudit>) {
-  const importantAuditIds = [
-    "render-blocking-resources",
-    "unused-javascript",
-    "unused-css-rules",
-    "modern-image-formats",
-    "uses-optimized-images",
-    "uses-responsive-images",
-    "total-byte-weight",
-    "largest-contentful-paint",
-    "cumulative-layout-shift",
-    "total-blocking-time",
-    "color-contrast",
-    "meta-description",
-    "document-title",
-    "uses-https",
-  ];
+ const importantAuditIds = [
+  "render-blocking-resources",
+  "unused-javascript",
+  "unused-css-rules",
+  "total-byte-weight",
+
+  "third-party-summary",
+  "third-party-facades",
+  "bootup-time",
+  "mainthread-work-breakdown",
+
+  "uses-text-compression",
+  "unminified-css",
+  "unminified-javascript",
+  "duplicated-javascript",
+  "legacy-javascript",
+
+  "uses-rel-preconnect",
+  "font-display",
+  "redirects",
+
+  "modern-image-formats",
+  "uses-optimized-images",
+  "uses-responsive-images",
+  "offscreen-images",
+  "efficiently-encode-images",
+
+  "largest-contentful-paint",
+  "cumulative-layout-shift",
+  "total-blocking-time",
+
+  "color-contrast",
+  "image-alt",
+  "button-name",
+  "link-name",
+  "tap-targets",
+
+  "meta-description",
+  "document-title",
+  "uses-https",
+];
 
   const findings = importantAuditIds
-    .map((auditId) => audits[auditId])
-    .filter((audit): audit is PageSpeedAudit => Boolean(audit))
-    .filter((audit) => {
+    .map((auditId) => ({
+      auditId,
+      audit: audits[auditId],
+    }))
+    .filter(
+      (item): item is { auditId: string; audit: PageSpeedAudit } =>
+        Boolean(item.audit)
+    )
+    .filter(({ audit }) => {
       if (typeof audit.score !== "number") return false;
+
       return audit.score < 0.9;
     })
-    .slice(0, 3)
-    .map((audit) => ({
+    .slice(0, 6)
+    .map(({ auditId, audit }) => ({
+      auditId,
       title: audit.title || "İyileştirme önerisi",
       desc: cleanDescription(
         audit.description || "Bu alanda iyileştirme yapılabilir."
@@ -142,6 +175,7 @@ function createFindings(audits: Record<string, PageSpeedAudit>) {
 
   return [
     {
+      auditId: "no-critical-issues",
       title: "Kritik sorun bulunmadı",
       desc: "PageSpeed Insights analizine göre temel metriklerde ciddi bir problem tespit edilmedi.",
       tag: "Bilgi" as const,

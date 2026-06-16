@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import {
+  getReportRecommendations,
+  type ReportRecommendation,
+} from "@/lib/report-recommendations";
 
 const topNav = [
   { title: "Dashboard", href: "/dashboard" },
@@ -22,6 +26,7 @@ const sidebarItems = [
 type FindingTag = "Kritik" | "Uyarı" | "Bilgi";
 
 type ReportFinding = {
+  auditId?: string;
   title: string;
   desc: string;
   tag: FindingTag;
@@ -55,25 +60,21 @@ type ReportResponse = Partial<ReportData> & {
 };
 
 export default function ReportPage() {
+  const router = useRouter();
+
   const [report, setReport] = useState<ReportData | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    let isActive = true;
+
     const params = new URLSearchParams(window.location.search);
     const jobId = params.get("jobId");
 
-    if (!jobId) {
-      setError("Rapor kimliği bulunamadı.");
-      setIsLoading(false);
-      return;
-    }
-
-    let isActive = true;
-
-    async function fetchReport() {
+    async function fetchReport(currentJobId: string) {
       try {
-        const response = await fetch(`/api/report/${jobId}`, {
+        const response = await fetch(`/api/report/${currentJobId}`, {
           cache: "no-store",
         });
 
@@ -83,7 +84,13 @@ export default function ReportPage() {
           throw new Error(data.message || "Rapor alınamadı.");
         }
 
-        if (!data.id || !data.url || !data.scores || !data.findings || !data.vitals) {
+        if (
+          !data.id ||
+          !data.url ||
+          !data.scores ||
+          !data.findings ||
+          !data.vitals
+        ) {
           throw new Error("Rapor datası eksik geldi.");
         }
 
@@ -102,12 +109,60 @@ export default function ReportPage() {
       }
     }
 
-    fetchReport();
+    async function redirectToLatestReport() {
+      try {
+        const response = await fetch("/api/analyze", {
+          cache: "no-store",
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.message || "Analiz geçmişi alınamadı.");
+        }
+
+        const latestCompletedJob = Array.isArray(data.items)
+          ? data.items.find((item: { id: string; status: string }) => {
+              return item.status === "completed";
+            })
+          : null;
+
+        if (latestCompletedJob?.id) {
+          router.replace(`/report?jobId=${latestCompletedJob.id}`);
+
+          await fetchReport(latestCompletedJob.id);
+
+          return;
+        }
+
+        if (isActive) {
+          setError(
+            "Henüz tamamlanmış rapor bulunamadı. Önce yeni bir analiz başlatın."
+          );
+          setIsLoading(false);
+        }
+      } catch (err) {
+        if (isActive) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Rapor yönlendirmesi yapılamadı."
+          );
+          setIsLoading(false);
+        }
+      }
+    }
+
+    if (!jobId) {
+      redirectToLatestReport();
+    } else {
+      fetchReport(jobId);
+    }
 
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [router]);
 
   return (
     <main className="min-h-screen bg-[#090a0a] text-[#dce8e7]">
@@ -264,6 +319,97 @@ function ReportContent({
   error: string;
   isLoading: boolean;
 }) {
+  const [developerCopyStatus, setDeveloperCopyStatus] = useState<
+    "idle" | "success" | "error"
+  >("idle");
+
+  const recommendations = report
+    ? getReportRecommendations(
+        report.findings.map((finding) => ({
+          auditId: finding.auditId,
+          title: finding.title,
+          description: finding.desc,
+          category: finding.tag,
+        }))
+      )
+    : [];
+
+  function handleDownloadPdf() {
+    window.print();
+  }
+
+  async function handleSendToDevelopers() {
+    if (!report) return;
+
+    const message = [
+      "AetherAnalytics Teknik Rapor",
+      "============================",
+      "",
+      `URL: ${report.url}`,
+      `Rapor ID: ${report.id}`,
+      "",
+      "Skorlar",
+      "------",
+      `Overall Score: ${report.overallScore}/100`,
+      `Performance: ${report.scores.performance}/100`,
+      `UX: ${report.scores.ux}/100`,
+      `SEO: ${report.scores.seo}/100`,
+      `Accessibility: ${report.scores.accessibility}/100`,
+      `Security: ${report.scores.security}/100`,
+      "",
+      "PageSpeed Bulguları",
+      "-------------------",
+      ...report.findings.flatMap((finding, index) => [
+        `${index + 1}. ${finding.title}`,
+        finding.auditId ? `Audit ID: ${finding.auditId}` : "",
+        `Seviye: ${finding.tag}`,
+        `Açıklama: ${finding.desc}`,
+        "",
+      ]),
+      "Akıllı Çözüm Önerileri",
+      "----------------------",
+      ...recommendations.flatMap((recommendation, index) => [
+        `${index + 1}. ${recommendation.title}`,
+        `Kategori: ${recommendation.category}`,
+        `Öncelik: ${getPriorityLabel(recommendation.priority)}`,
+        `Açıklama: ${recommendation.description}`,
+        "Aksiyonlar:",
+        ...recommendation.actions.map((action) => `- ${action}`),
+        "",
+      ]),
+      "Core Web Vitals",
+      "---------------",
+      ...report.vitals.map(
+        (vital) =>
+          `${vital.metric}: ${vital.ours} | Ortalama: ${vital.average} | Lider: ${vital.leader} | Durum: ${vital.status}`
+      ),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    try {
+      await navigator.clipboard.writeText(message);
+
+      setDeveloperCopyStatus("success");
+
+      window.setTimeout(() => {
+        setDeveloperCopyStatus("idle");
+      }, 2500);
+    } catch {
+      const subject = encodeURIComponent(
+        `AetherAnalytics Raporu - ${report.url}`
+      );
+      const body = encodeURIComponent(message);
+
+      setDeveloperCopyStatus("error");
+      window.location.href = `mailto:?subject=${subject}&body=${body}`;
+
+      window.setTimeout(() => {
+        setDeveloperCopyStatus("idle");
+      }, 2500);
+    }
+  }
+
   if (isLoading) {
     return (
       <section className="flex min-h-[calc(100vh-58px)] items-center justify-center bg-[#050707] px-5">
@@ -328,18 +474,30 @@ function ReportContent({
 
             <p className="mt-5 max-w-150 text-[18px] font-medium leading-normal text-[#b9c4c3]">
               {report.url} için UX ve performans anormalliklerinin detaylı
-              analizi. Yapay zeka destekli çözüm önerileri üretilmiştir.
+              analizi. Akıllı çözüm önerileri üretilmiştir.
             </p>
           </div>
 
           <div className="mb-1 flex items-center gap-2">
-            <button className="flex h-8.5 items-center gap-2 border border-white/15 px-5 text-[12px] font-bold text-white transition hover:bg-white/4">
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              className="flex h-8.5 items-center gap-2 border border-white/15 px-5 text-[12px] font-bold text-white transition hover:bg-white/4"
+            >
               <DownloadIcon />
               PDF İndir
             </button>
 
-            <button className="h-8.5 bg-[#15dbe8] px-5 text-[12px] font-bold text-[#042f32] transition hover:bg-[#77faff]">
-              Geliştiricilere İlet
+            <button
+              type="button"
+              onClick={handleSendToDevelopers}
+              className="h-8.5 bg-[#15dbe8] px-5 text-[12px] font-bold text-[#042f32] transition hover:bg-[#77faff]"
+            >
+              {developerCopyStatus === "success"
+                ? "Rapor Kopyalandı"
+                : developerCopyStatus === "error"
+                  ? "Mail Taslağı Açıldı"
+                  : "Geliştiricilere İlet"}
             </button>
           </div>
         </div>
@@ -351,7 +509,7 @@ function ReportContent({
           <FindingsCard findings={report.findings} />
         </div>
 
-        <SuggestionsCard />
+        <SuggestionsCard recommendations={recommendations} />
         <VitalsTable vitals={report.vitals} />
       </div>
     </section>
@@ -432,7 +590,11 @@ function HealthScoreCard({ report }: { report: ReportData }) {
         <div className="mt-24 h-px w-full bg-white/10" />
 
         <div className="mt-4 grid grid-cols-3 text-center">
-          <ScoreMini title="Performans" value={report.scores.performance} danger />
+          <ScoreMini
+            title="Performans"
+            value={report.scores.performance}
+            danger
+          />
           <ScoreMini title="UX" value={report.scores.ux} />
           <ScoreMini title="Güvenlik" value={report.scores.security} cyan />
         </div>
@@ -538,49 +700,127 @@ function getFindingMeta(tag: FindingTag) {
   };
 }
 
-function SuggestionsCard() {
+function SuggestionsCard({
+  recommendations,
+}: {
+  recommendations: ReportRecommendation[];
+}) {
   return (
     <div className="mt-6 rounded-md border border-white/10 bg-[#070808] p-6">
       <h2 className="mb-6 flex items-center gap-3 text-[22px] font-bold tracking-[-0.7px] text-[#70f8ff]">
         <SparkIcon />
-        AI Destekli Çözüm Önerileri
+        Akıllı Çözüm Önerileri
       </h2>
 
-      <div className="grid grid-cols-2 gap-8 max-lg:grid-cols-1">
-        <div className="border-l-2 border-[#ffaaa4] pl-5">
+      {recommendations.length > 0 ? (
+        <div className="grid grid-cols-2 gap-8 max-lg:grid-cols-1">
+          {recommendations.map((recommendation) => {
+            const meta = getRecommendationMeta(recommendation);
+
+            return (
+              <div
+                key={recommendation.id}
+                className={`border-l-2 ${meta.borderColor} pl-5`}
+              >
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-xs px-3 py-1.5 font-mono text-[11px] font-bold ${meta.badgeColor}`}
+                  >
+                    {recommendation.category}
+                  </span>
+
+                  <span className="rounded-xs bg-white/6 px-3 py-1.5 font-mono text-[11px] font-bold text-[#9ea8a7]">
+                    {getPriorityLabel(recommendation.priority)}
+                  </span>
+                </div>
+
+                <h3 className="text-[16px] font-bold text-[#d6d0d0]">
+                  {recommendation.title}
+                </h3>
+
+                <p className="mt-3 text-[14px] font-medium leading-normal text-[#aab4b3]">
+                  {recommendation.description}
+                </p>
+
+                <ul className="mt-4 space-y-2">
+                  {recommendation.actions.map((action) => (
+                    <li
+                      key={action}
+                      className="flex gap-2 text-[13px] font-medium leading-normal text-[#aab4b3]"
+                    >
+                      <span
+                        className={`mt-2 size-1.5 shrink-0 rounded-full ${meta.dotColor}`}
+                      />
+                      <span>{action}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                {recommendation.matchedFindings.length > 0 && (
+                  <div className="mt-5 rounded-xs bg-[#111111] p-3">
+                    <p className="mb-2 font-mono text-[11px] font-bold tracking-[0.8px] text-[#636b6a]">
+                      İLGİLİ BULGU
+                    </p>
+
+                    <div className="space-y-1">
+                      {recommendation.matchedFindings.map((finding) => (
+                        <p
+                          key={finding}
+                          className="text-[12px] font-medium leading-normal text-[#7f8988]"
+                        >
+                          {finding}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-xs border border-white/10 bg-[#111111] p-5">
           <h3 className="text-[16px] font-bold text-[#d6d0d0]">
-            Web Worker Entegrasyonu
+            Kritik öneri bulunamadı
           </h3>
 
           <p className="mt-3 text-[14px] font-medium leading-normal text-[#aab4b3]">
-            Ağır veri işleme görevlerini ana iplikten ayırmak için Web Worker
-            kullanın. Bu, TBT&apos;yi tahmini olarak %80 azaltacaktır.
+            Bu raporda öneri üretilecek özel bir PageSpeed bulgusu bulunamadı.
           </p>
-
-          <pre className="mt-4 overflow-hidden rounded-xs bg-[#111111] p-3 font-mono text-[12px] font-bold leading-[1.6] text-[#636b6a]">
-            {`const worker = new Worker('data-
-processor.js');
-worker.postMessage(heavyDataset);`}
-          </pre>
         </div>
-
-        <div className="border-l-2 border-[#18dce9] pl-5">
-          <h3 className="text-[16px] font-bold text-[#d6d0d0]">
-            Erişilebilirlik Düzenlemeleri
-          </h3>
-
-          <p className="mt-3 text-[14px] font-medium leading-normal text-[#aab4b3]">
-            Navigasyon elemanlarına `min-h-[48px]` ve `min-w-[48px]`
-            uygulayarak dokunmatik hedef alanlarını genişletin.
-          </p>
-
-          <a href="#" className="mt-3 inline-flex font-mono text-[12px] font-bold text-[#18dce9]">
-            Kodu Uygula →
-          </a>
-        </div>
-      </div>
+      )}
     </div>
   );
+}
+
+function getRecommendationMeta(recommendation: ReportRecommendation) {
+  if (recommendation.priority === "high") {
+    return {
+      borderColor: "border-[#ffaaa4]",
+      badgeColor: "bg-[#4a1515] text-[#ffaaa4]",
+      dotColor: "bg-[#ffaaa4]",
+    };
+  }
+
+  if (recommendation.category === "Accessibility") {
+    return {
+      borderColor: "border-[#5df6a8]",
+      badgeColor: "bg-[#143923] text-[#5df6a8]",
+      dotColor: "bg-[#5df6a8]",
+    };
+  }
+
+  return {
+    borderColor: "border-[#18dce9]",
+    badgeColor: "bg-[#12393b] text-[#19dbe7]",
+    dotColor: "bg-[#18dce9]",
+  };
+}
+
+function getPriorityLabel(priority: ReportRecommendation["priority"]) {
+  if (priority === "high") return "Yüksek Öncelik";
+  if (priority === "medium") return "Orta Öncelik";
+  return "Düşük Öncelik";
 }
 
 function VitalsTable({ vitals }: { vitals: ReportVital[] }) {
@@ -659,8 +899,18 @@ function VitalsTable({ vitals }: { vitals: ReportVital[] }) {
 function SlidersIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <path d="M5 4V20M12 4V20M19 4V20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M3 8H7M10 15H14M17 10H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M5 4V20M12 4V20M19 4V20"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M3 8H7M10 15H14M17 10H21"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -668,8 +918,17 @@ function SlidersIcon() {
 function BellIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M18 9A6 6 0 0 0 6 9C6 16 3 17 3 17H21S18 16 18 9Z" stroke="currentColor" strokeWidth="2" />
-      <path d="M10 21H14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M18 9A6 6 0 0 0 6 9C6 16 3 17 3 17H21S18 16 18 9Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M10 21H14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -677,8 +936,20 @@ function BellIcon() {
 function TerminalIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="5" width="18" height="14" stroke="currentColor" strokeWidth="2" />
-      <path d="M7 10L10 12L7 14M12 15H17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <rect
+        x="3"
+        y="5"
+        width="18"
+        height="14"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M7 10L10 12L7 14M12 15H17"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -686,8 +957,20 @@ function TerminalIcon() {
 function ChipIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <rect x="8" y="8" width="8" height="8" stroke="currentColor" strokeWidth="2" />
-      <path d="M12 3V6M12 18V21M3 12H6M18 12H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <rect
+        x="8"
+        y="8"
+        width="8"
+        height="8"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M12 3V6M12 18V21M3 12H6M18 12H21"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -695,10 +978,38 @@ function ChipIcon() {
 function GridIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <rect x="4" y="4" width="6" height="6" stroke="currentColor" strokeWidth="2" />
-      <rect x="14" y="4" width="6" height="6" stroke="currentColor" strokeWidth="2" />
-      <rect x="4" y="14" width="6" height="6" stroke="currentColor" strokeWidth="2" />
-      <rect x="14" y="14" width="6" height="6" stroke="currentColor" strokeWidth="2" />
+      <rect
+        x="4"
+        y="4"
+        width="6"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <rect
+        x="14"
+        y="4"
+        width="6"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <rect
+        x="4"
+        y="14"
+        width="6"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <rect
+        x="14"
+        y="14"
+        width="6"
+        height="6"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
     </svg>
   );
 }
@@ -706,7 +1017,12 @@ function GridIcon() {
 function FlowIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <path d="M4 17L9 12L13 15L20 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M4 17L9 12L13 15L20 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
       <circle cx="4" cy="17" r="1.5" fill="currentColor" />
       <circle cx="9" cy="12" r="1.5" fill="currentColor" />
       <circle cx="13" cy="15" r="1.5" fill="currentColor" />
@@ -718,8 +1034,18 @@ function FlowIcon() {
 function SpeedIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <path d="M5 16A7 7 0 0 1 19 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M12 16L16 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M5 16A7 7 0 0 1 19 16"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 16L16 11"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -727,7 +1053,10 @@ function SpeedIcon() {
 function ShieldIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <path d="M12 3L20 6V11C20 16 16.8 20 12 21C7.2 20 4 16 4 11V6L12 3Z" fill="currentColor" />
+      <path
+        d="M12 3L20 6V11C20 16 16.8 20 12 21C7.2 20 4 16 4 11V6L12 3Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -735,8 +1064,20 @@ function ShieldIcon() {
 function LogsIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="4" width="18" height="16" stroke="currentColor" strokeWidth="2" />
-      <path d="M8 8H16M8 12H16M8 16H13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <rect
+        x="3"
+        y="4"
+        width="18"
+        height="16"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M8 8H16M8 12H16M8 16H13"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -745,7 +1086,12 @@ function HelpIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-      <path d="M9.8 9A2.3 2.3 0 0 1 12 7.5C13.4 7.5 14.5 8.4 14.5 9.8C14.5 11.6 12 11.8 12 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M9.8 9A2.3 2.3 0 0 1 12 7.5C13.4 7.5 14.5 8.4 14.5 9.8C14.5 11.6 12 11.8 12 14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
       <circle cx="12" cy="17" r="1" fill="currentColor" />
     </svg>
   );
@@ -754,7 +1100,13 @@ function HelpIcon() {
 function CodeIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M8 9L4 12L8 15M16 9L20 12L16 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M8 9L4 12L8 15M16 9L20 12L16 15"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -762,8 +1114,18 @@ function CodeIcon() {
 function WarningIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M12 4L21 20H3L12 4Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M12 10V14M12 17H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M12 4L21 20H3L12 4Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 10V14M12 17H12.01"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -771,7 +1133,12 @@ function WarningIcon() {
 function DownloadIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <path d="M12 4V15M12 15L8 11M12 15L16 11M5 20H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M12 4V15M12 15L8 11M12 15L16 11M5 20H19"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -780,7 +1147,12 @@ function SearchIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-      <path d="M16.5 16.5L21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M16.5 16.5L21 21"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -788,7 +1160,12 @@ function SearchIcon() {
 function TouchIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M9 11V5A2 2 0 0 1 13 5V13M13 13L14 10A2 2 0 0 1 18 11L16 18C15.5 20 14 21 12 21H10C8 21 6.5 20 5.5 18L3 13A1.8 1.8 0 0 1 6.2 11.5L8 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M9 11V5A2 2 0 0 1 13 5V13M13 13L14 10A2 2 0 0 1 18 11L16 18C15.5 20 14 21 12 21H10C8 21 6.5 20 5.5 18L3 13A1.8 1.8 0 0 1 6.2 11.5L8 14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -796,8 +1173,21 @@ function TouchIcon() {
 function ImageIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <rect x="4" y="5" width="16" height="14" stroke="currentColor" strokeWidth="2" />
-      <path d="M8 15L11 12L13 14L16 10L20 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <rect
+        x="4"
+        y="5"
+        width="16"
+        height="14"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M8 15L11 12L13 14L16 10L20 15"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <circle cx="9" cy="9" r="1.2" fill="currentColor" />
     </svg>
   );
@@ -806,8 +1196,18 @@ function ImageIcon() {
 function SparkIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <path d="M12 3L13.8 8.2L19 10L13.8 11.8L12 17L10.2 11.8L5 10L10.2 8.2L12 3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M19 15L20 18L23 19L20 20L19 23L18 20L15 19L18 18L19 15Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <path
+        d="M12 3L13.8 8.2L19 10L13.8 11.8L12 17L10.2 11.8L5 10L10.2 8.2L12 3Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M19 15L20 18L23 19L20 20L19 23L18 20L15 19L18 18L19 15Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -816,7 +1216,13 @@ function CheckCircleIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" />
-      <path d="M8.5 12L11 14.5L15.5 9.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M8.5 12L11 14.5L15.5 9.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

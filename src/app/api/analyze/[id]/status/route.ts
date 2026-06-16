@@ -1,4 +1,4 @@
-import { getAnalyzeJob } from "@/lib/analyze-store";
+import { deleteAnalyzeJob, getAnalyzeJob } from "@/lib/analyze-store";
 
 type RouteContext = {
   params: Promise<{
@@ -18,7 +18,7 @@ export async function GET(_request: Request, context: RouteContext) {
       },
       {
         status: 404,
-      }
+      },
     );
   }
 
@@ -29,5 +29,27 @@ export async function GET(_request: Request, context: RouteContext) {
     progress: job.progress,
     logs: job.logs,
     reportId: job.status === "completed" ? job.id : null,
+  });
+}
+
+export async function DELETE(_request: Request, context: RouteContext) {
+  const { id } = await context.params;
+
+  const result = await deleteAnalyzeJob(id);
+
+  if (!result.success) {
+    return Response.json(
+      {
+        message: result.message || "Analiz bulunamadı.",
+      },
+      {
+        status: 404,
+      },
+    );
+  }
+
+  return Response.json({
+    success: true,
+    message: "Analiz silindi.",
   });
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -205,9 +206,12 @@ function Sidebar() {
 }
 
 function DashboardContent() {
+  const router = useRouter();
+
   const [jobs, setJobs] = useState<AnalyzeListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionJobId, setActionJobId] = useState("");
 
   useEffect(() => {
     let isActive = true;
@@ -248,6 +252,62 @@ function DashboardContent() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  async function handleDeleteJob(jobId: string) {
+    const confirmed = window.confirm("Bu analiz kaydı silinsin mi?");
+
+    if (!confirmed) return;
+
+    try {
+      setActionJobId(jobId);
+
+      const response = await fetch(`/api/analyze/${jobId}`, {
+        method: "DELETE",
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(data?.message || "Analiz silinemedi.");
+      }
+
+      setJobs((currentJobs) => currentJobs.filter((job) => job.id !== jobId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Analiz silinemedi.");
+    } finally {
+      setActionJobId("");
+    }
+  }
+
+  async function handleRerunJob(url: string) {
+    try {
+      setActionJobId(url);
+
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Analiz tekrar başlatılamadı.");
+      }
+
+      router.push(`/loading?jobId=${data.jobId}`);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Analiz tekrar başlatılamadı.",
+      );
+    } finally {
+      setActionJobId("");
+    }
+  }
 
   const stats = useMemo<DashboardStats>(() => {
     const completedJobs = jobs.filter((job) => job.status === "completed");
@@ -295,7 +355,7 @@ function DashboardContent() {
           </h1>
 
           <p className="mt-2 font-mono text-[14px] font-medium tracking-[0.3px] text-[#a8b3b2]">
-            Canlı sistem izleme ve öngörücü AI içgörüleri.
+            Canlı sistem izleme ve akıllı performans içgörüleri.
           </p>
 
           {error && (
@@ -332,7 +392,15 @@ function DashboardContent() {
 
           <div className="grid grid-cols-2 gap-6 max-lg:grid-cols-1">
             <CompetitorCard />
-            <AuditHistoryCard jobs={jobs} isLoading={isLoading} error={error} />
+
+            <AuditHistoryCard
+              jobs={jobs}
+              isLoading={isLoading}
+              error={error}
+              actionJobId={actionJobId}
+              onDeleteJob={handleDeleteJob}
+              onRerunJob={handleRerunJob}
+            />
           </div>
         </div>
 
@@ -694,13 +762,19 @@ function AuditHistoryCard({
   jobs,
   isLoading,
   error,
+  actionJobId,
+  onDeleteJob,
+  onRerunJob,
 }: {
   jobs: AnalyzeListItem[];
   isLoading: boolean;
   error: string;
+  actionJobId: string;
+  onDeleteJob: (jobId: string) => void | Promise<void>;
+  onRerunJob: (url: string) => void | Promise<void>;
 }) {
   return (
-    <Panel className="h-75">
+    <Panel className="min-h-75">
       <div className="mb-7 flex items-center justify-between">
         <h2 className="text-[13px] font-bold tracking-[1px] text-[#c2cbca]">
           SON DENETİM GEÇMİŞİ
@@ -734,13 +808,10 @@ function AuditHistoryCard({
           !error &&
           jobs.slice(0, 4).map((job) => {
             const isCompleted = job.status === "completed";
+            const isBusy = actionJobId === job.id || actionJobId === job.url;
 
             return (
-              <Link
-                key={job.id}
-                href={isCompleted ? `/report?jobId=${job.id}` : "#"}
-                className="flex items-start gap-4"
-              >
+              <div key={job.id} className="flex items-start gap-4">
                 <span
                   className={`mt-1 flex size-3.75 shrink-0 items-center justify-center rounded-full border ${
                     isCompleted
@@ -754,26 +825,71 @@ function AuditHistoryCard({
                 </span>
 
                 <div className="min-w-0 flex-1">
-                  <h3 className="truncate text-[13px] font-bold text-[#bfc9c8]">
-                    {getHostName(job.url)} - Otomatik Denetim
-                  </h3>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-[13px] font-bold text-[#bfc9c8]">
+                        {getHostName(job.url)} - Otomatik Denetim
+                      </h3>
 
-                  <p className="mt-1 font-mono text-[10px] font-bold text-[#76807f]">
-                    {isCompleted
-                      ? `Skor: ${job.overallScore ?? "-"} / 100 · Tamamlandı`
-                      : `Devam Ediyor... ${job.progress}%`}
-                  </p>
+                      <p className="mt-1 font-mono text-[10px] font-bold text-[#76807f]">
+                        {isCompleted
+                          ? `Skor: ${job.overallScore ?? "-"} / 100 · Tamamlandı`
+                          : `Devam Ediyor... ${job.progress}%`}
+                      </p>
+                    </div>
+
+                    <span className="shrink-0 font-mono text-[10px] font-bold text-[#717b7a]">
+                      {formatTimeAgo(job.createdAt)}
+                    </span>
+                  </div>
+
                   {job.isFallback && (
                     <span className="mt-2 inline-flex rounded-xs border border-[#18dce9]/30 bg-[#12393b] px-2 py-1 font-mono text-[9px] font-bold tracking-[0.5px] text-[#18dce9]">
                       FALLBACK RAPOR
                     </span>
                   )}
-                </div>
 
-                <span className="shrink-0 font-mono text-[10px] font-bold text-[#717b7a]">
-                  {formatTimeAgo(job.createdAt)}
-                </span>
-              </Link>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {isCompleted ? (
+                      <Link
+                        href={`/report?jobId=${job.id}`}
+                        className="rounded-xs border border-[#18dce9]/30 px-2.5 py-1.5 font-mono text-[10px] font-bold text-[#18dce9] transition hover:bg-[#12393b]"
+                      >
+                        Raporu Aç
+                      </Link>
+                    ) : (
+                      <Link
+                        href={`/loading?jobId=${job.id}`}
+                        className="rounded-xs border border-[#b997ff]/30 px-2.5 py-1.5 font-mono text-[10px] font-bold text-[#b997ff] transition hover:bg-[#24113e]"
+                      >
+                        Canlı İzle
+                      </Link>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => onRerunJob(job.url)}
+                      className="rounded-xs border border-white/10 px-2.5 py-1.5 font-mono text-[10px] font-bold text-[#bfc9c8] transition hover:bg-white/4 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isBusy && actionJobId === job.url
+                        ? "Başlatılıyor..."
+                        : "Tekrar Analiz Et"}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => onDeleteJob(job.id)}
+                      className="rounded-xs border border-[#4a1515] px-2.5 py-1.5 font-mono text-[10px] font-bold text-[#ffaaa4] transition hover:bg-[#4a1515]/40 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isBusy && actionJobId === job.id
+                        ? "Siliniyor..."
+                        : "Sil"}
+                    </button>
+                  </div>
+                </div>
+              </div>
             );
           })}
       </div>

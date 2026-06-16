@@ -36,6 +36,7 @@ export type AnalyzeReport = {
     accessibility: number;
   };
   findings: {
+    auditId?: string;
     title: string;
     desc: string;
     tag: "Kritik" | "Uyarı" | "Bilgi";
@@ -94,6 +95,31 @@ export async function listAnalyzeJobs() {
   return updatedJobs.sort(
     (a: AnalyzeJob, b: AnalyzeJob) => b.createdAt - a.createdAt
   );
+}
+
+export async function deleteAnalyzeJob(id: string) {
+  const job = await prisma.analyzeJob.findUnique({
+    where: {
+      id,
+    },
+  });
+
+  if (!job) {
+    return {
+      success: false,
+      message: "Analiz bulunamadı.",
+    };
+  }
+
+  await prisma.analyzeJob.delete({
+    where: {
+      id,
+    },
+  });
+
+  return {
+    success: true,
+  };
 }
 
 async function updateJobProgress(job: AnalyzeJob) {
@@ -205,7 +231,7 @@ function createLogs(url: string, progress: number) {
   }
 
   if (progress >= 78) {
-    logs.push("> Derin AI sezgiselleri hesaplanıyor...");
+    logs.push("> Akıllı öneri motoru hesaplanıyor...");
   }
 
   if (progress >= 100) {
@@ -233,16 +259,19 @@ function createFallbackReport(
     },
     findings: [
       {
+        auditId: "fallback-pagespeed-quota",
         title: "PageSpeed kotası doldu",
         desc: `Gerçek Lighthouse analizi alınamadı. Sistem fallback rapor oluşturdu. Hata: ${errorMessage}`,
         tag: "Uyarı",
       },
       {
+        auditId: "fallback-performance-report",
         title: "Fallback performans raporu",
         desc: "Bu rapor geçici demo verisiyle oluşturuldu. PageSpeed API key eklendiğinde gerçek skorlar üretilecektir.",
         tag: "Bilgi",
       },
       {
+        auditId: "fallback-api-key-recommended",
         title: "API key önerilir",
         desc: "Daha stabil analiz için Google PageSpeed Insights API key eklenmelidir.",
         tag: "Bilgi",
