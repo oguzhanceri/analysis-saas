@@ -52,14 +52,33 @@ type AnalyzeListResponse = {
   message?: string;
 };
 
+type ReportVital = {
+  metric: string;
+  ours: string;
+  average: string;
+  leader: string;
+  status: "success" | "warning";
+};
+
+type ReportDetailResponse = {
+  vitals?: ReportVital[];
+  message?: string;
+};
+
 type DashboardStats = {
   total: number;
   completed: number;
   running: number;
+  failed: number;
+  fallback: number;
   averageHealth: number;
   averageUx: number;
   averageSeo: number;
   averagePerformance: number;
+  healthChange: number;
+  uxChange: number;
+  seoChange: number;
+  performanceChange: number;
 };
 
 export default function DashboardPage() {
@@ -209,6 +228,7 @@ function DashboardContent() {
   const router = useRouter();
 
   const [jobs, setJobs] = useState<AnalyzeListItem[]>([]);
+  const [latestVitals, setLatestVitals] = useState<ReportVital[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionJobId, setActionJobId] = useState("");
@@ -310,10 +330,16 @@ function DashboardContent() {
   }
 
   const stats = useMemo<DashboardStats>(() => {
-    const completedJobs = jobs.filter((job) => job.status === "completed");
+    const completedJobs = jobs
+      .filter((job) => job.status === "completed")
+      .sort((a, b) => b.createdAt - a.createdAt);
+
     const jobsWithScore = completedJobs.filter(
       (job) => typeof job.overallScore === "number",
     );
+
+    const latestJob = completedJobs[0] || null;
+    const previousJob = completedJobs[1] || null;
 
     const average = (values: number[]) => {
       if (!values.length) return 0;
@@ -323,10 +349,29 @@ function DashboardContent() {
       );
     };
 
+    const getChange = (
+      currentValue: number | null | undefined,
+      previousValue: number | null | undefined,
+    ) => {
+      if (
+        typeof currentValue !== "number" ||
+        typeof previousValue !== "number"
+      ) {
+        return 0;
+      }
+
+      return currentValue - previousValue;
+    };
+
     return {
       total: jobs.length,
       completed: completedJobs.length,
-      running: jobs.filter((job) => job.status === "running").length,
+      running: jobs.filter(
+        (job) => job.status === "running" || job.status === "queued",
+      ).length,
+      failed: jobs.filter((job) => job.status === "failed").length,
+      fallback: jobs.filter((job) => job.isFallback).length,
+
       averageHealth: average(jobsWithScore.map((job) => job.overallScore || 0)),
       averageUx: average(
         completedJobs
@@ -343,8 +388,64 @@ function DashboardContent() {
           .map((job) => job.scores?.performance)
           .filter((value): value is number => typeof value === "number"),
       ),
+
+      healthChange: getChange(
+        latestJob?.overallScore,
+        previousJob?.overallScore,
+      ),
+      uxChange: getChange(latestJob?.scores?.ux, previousJob?.scores?.ux),
+      seoChange: getChange(latestJob?.scores?.seo, previousJob?.scores?.seo),
+      performanceChange: getChange(
+        latestJob?.scores?.performance,
+        previousJob?.scores?.performance,
+      ),
     };
   }, [jobs]);
+
+  const latestCompletedJobId = useMemo(() => {
+    const latestCompletedJob = jobs
+      .filter((job) => job.status === "completed")
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+    return latestCompletedJob?.id || "";
+  }, [jobs]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function fetchLatestVitals() {
+      if (!latestCompletedJobId) {
+        setLatestVitals([]);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/report/${latestCompletedJobId}`, {
+          cache: "no-store",
+        });
+
+        const data = (await response.json()) as ReportDetailResponse;
+
+        if (!response.ok) {
+          throw new Error(data.message || "Web vitals alınamadı.");
+        }
+
+        if (isActive) {
+          setLatestVitals(Array.isArray(data.vitals) ? data.vitals : []);
+        }
+      } catch {
+        if (isActive) {
+          setLatestVitals([]);
+        }
+      }
+    }
+
+    fetchLatestVitals();
+
+    return () => {
+      isActive = false;
+    };
+  }, [latestCompletedJobId]);
 
   return (
     <section className="px-12 py-12 max-xl:px-8 max-md:px-5">
@@ -386,12 +487,12 @@ function DashboardContent() {
         <div className="space-y-6">
           <StatsGrid stats={stats} />
 
-          <TrendCard />
+          <TrendCard jobs={jobs} />
 
-          <WebVitalsCard />
+          <WebVitalsCard vitals={latestVitals} />
 
           <div className="grid grid-cols-2 gap-6 max-lg:grid-cols-1">
-            <CompetitorCard />
+            <SystemSummaryCard stats={stats} />
 
             <AuditHistoryCard
               jobs={jobs}
@@ -416,41 +517,44 @@ function StatsGrid({ stats }: { stats: DashboardStats }) {
       <MetricCard
         title="BÜTÜNSEL SAĞLIK"
         value={String(stats.averageHealth)}
-        suffix=""
-        change="+2.4%"
+        suffix="/100"
+        change={formatScoreChange(stats.healthChange)}
         icon={<PulseIcon />}
         circular
+        negative={stats.healthChange < 0}
       />
 
       <MetricCard
         title="KULLANICI DENEYİMİ PUANI"
         value={String(stats.averageUx)}
         suffix="/100"
-        change="+1.1%"
+        change={formatScoreChange(stats.uxChange)}
         icon={<TouchIcon />}
         barPercent={stats.averageUx}
         barColor="#6c28ff"
+        negative={stats.uxChange < 0}
       />
 
       <MetricCard
         title="SEO PUANI"
         value={String(stats.averageSeo)}
         suffix="/100"
-        change="-0.5%"
+        change={formatScoreChange(stats.seoChange)}
         icon={<SearchIcon />}
-        negative
         barPercent={stats.averageSeo}
         barColor="#5ff7b6"
+        negative={stats.seoChange < 0}
       />
 
       <MetricCard
         title="PERFORMANS"
         value={String(stats.averagePerformance)}
         suffix="/100"
-        change="+5.2%"
+        change={formatScoreChange(stats.performanceChange)}
         icon={<SpeedIcon />}
         barPercent={stats.averagePerformance}
         barColor="#76f4ff"
+        negative={stats.performanceChange < 0}
       />
     </div>
   );
@@ -482,6 +586,8 @@ function MetricCard({
     ? Math.min(360, Math.max(0, Math.round((numberValue / 100) * 360)))
     : 0;
 
+  const isNeutral = change === "0";
+
   return (
     <div className="relative min-h-34 rounded-sm border border-white/10 bg-[#111414] p-5">
       <div className="flex items-start justify-between">
@@ -509,14 +615,18 @@ function MetricCard({
           <div>
             <p
               className={`text-[13px] font-bold ${
-                negative ? "text-[#ee9d9b]" : "text-[#57f6aa]"
+                isNeutral
+                  ? "text-[#8d9897]"
+                  : negative
+                    ? "text-[#ee9d9b]"
+                    : "text-[#57f6aa]"
               }`}
             >
-              {negative ? "↓" : "↑"}
+              {isNeutral ? "→" : negative ? "↓" : "↑"}
               {change.replace("+", "").replace("-", "")}
             </p>
             <p className="mt-1 text-[10px] font-medium text-[#818b8a]">
-              geçen döneme göre
+              önceki analize göre
             </p>
           </div>
         </div>
@@ -534,10 +644,14 @@ function MetricCard({
 
             <p
               className={`text-[12px] font-bold ${
-                negative ? "text-[#ee9d9b]" : "text-[#57f6aa]"
+                isNeutral
+                  ? "text-[#8d9897]"
+                  : negative
+                    ? "text-[#ee9d9b]"
+                    : "text-[#57f6aa]"
               }`}
             >
-              {negative ? "↓" : "↑"}
+              {isNeutral ? "→" : negative ? "↓" : "↑"}
               {change.replace("+", "").replace("-", "")}
             </p>
           </div>
@@ -557,17 +671,37 @@ function MetricCard({
   );
 }
 
-function TrendCard() {
+function TrendCard({ jobs }: { jobs: AnalyzeListItem[] }) {
+  const trendJobs = jobs
+    .filter(
+      (job) =>
+        job.status === "completed" && typeof job.overallScore === "number",
+    )
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .slice(-8);
+
+  const values = trendJobs.map((job) => job.overallScore || 0);
+  const chart = buildTrendPath(values);
+
+  const latestScore =
+    trendJobs.length > 0 ? trendJobs[trendJobs.length - 1].overallScore : null;
+
   return (
     <Panel className="h-77.5">
       <div className="mb-5 flex items-center justify-between">
-        <h2 className="text-[13px] font-bold tracking-[1px] text-[#c2cbca]">
-          DENETİM PUANI TRENDLERİ
-        </h2>
+        <div>
+          <h2 className="text-[13px] font-bold tracking-[1px] text-[#c2cbca]">
+            DENETİM PUANI TRENDLERİ
+          </h2>
+
+          <p className="mt-1 font-mono text-[10px] font-bold text-[#626d6c]">
+            Son {trendJobs.length} tamamlanan analiz
+          </p>
+        </div>
 
         <div className="flex items-center gap-2 text-[11px] font-bold text-[#737e7d]">
           <span className="size-2 rounded-full bg-[#77f4ff]" />
-          Küresel Ortalama
+          Son skor: {latestScore ?? "-"}
         </div>
       </div>
 
@@ -576,52 +710,109 @@ function TrendCard() {
         <div className="absolute left-0 top-[50%] h-px w-full border-t border-dashed border-white/10" />
         <div className="absolute left-0 top-[75%] h-px w-full border-t border-dashed border-white/10" />
 
-        <svg
-          className="absolute inset-0 h-full w-full"
-          viewBox="0 0 600 230"
-          preserveAspectRatio="none"
-        >
-          <defs>
-            <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#16e5ee" stopOpacity="0.18" />
-              <stop offset="100%" stopColor="#16e5ee" stopOpacity="0" />
-            </linearGradient>
-          </defs>
+        {values.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-center font-mono text-[11px] font-bold text-[#76807f]">
+            Trend oluşturmak için tamamlanmış analiz bekleniyor.
+          </div>
+        ) : (
+          <svg
+            className="absolute inset-0 h-full w-full"
+            viewBox="0 0 600 230"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#16e5ee" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="#16e5ee" stopOpacity="0" />
+              </linearGradient>
+            </defs>
 
-          <path
-            d="M0 175 L75 148 L150 158 L225 120 L300 128 L375 82 L450 104 L525 44 L600 65"
-            fill="none"
-            stroke="#14e7f0"
-            strokeWidth="2.5"
-          />
+            <path d={chart.fillPath} fill="url(#trendFill)" />
 
-          <path
-            d="M0 175 L75 148 L150 158 L225 120 L300 128 L375 82 L450 104 L525 44 L600 65 L600 230 L0 230 Z"
-            fill="url(#trendFill)"
-          />
-        </svg>
+            <path
+              d={chart.linePath}
+              fill="none"
+              stroke="#14e7f0"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {chart.points.map((point, index) => (
+              <circle
+                key={`${point.x}-${point.y}-${index}`}
+                cx={point.x}
+                cy={point.y}
+                r="4"
+                fill="#14e7f0"
+              />
+            ))}
+          </svg>
+        )}
       </div>
     </Panel>
   );
 }
 
-function WebVitalsCard() {
+function WebVitalsCard({ vitals }: { vitals: ReportVital[] }) {
+  const visibleVitals = vitals.slice(0, 3);
+
   return (
-    <Panel className="h-47.5">
+    <Panel className="min-h-47.5">
       <div className="mb-5 flex items-center justify-between">
-        <h2 className="text-[13px] font-bold tracking-[1px] text-[#c2cbca]">
-          TEMEL WEB VERİLERİ
-        </h2>
+        <div>
+          <h2 className="text-[13px] font-bold tracking-[1px] text-[#c2cbca]">
+            TEMEL WEB VERİLERİ
+          </h2>
+
+          <p className="mt-1 font-mono text-[10px] font-bold text-[#626d6c]">
+            Son tamamlanan rapordan alınır
+          </p>
+        </div>
+
         <span className="text-[#8a9493]">...</span>
       </div>
 
       <div className="h-px w-full bg-white/5" />
 
-      <div className="grid h-30 grid-cols-3 items-end text-center font-mono text-[11px] font-bold text-[#6f7a79]">
-        <span>LCP</span>
-        <span>FID</span>
-        <span>CLS</span>
-      </div>
+      {visibleVitals.length === 0 ? (
+        <div className="flex h-30 items-center justify-center text-center font-mono text-[11px] font-bold text-[#76807f]">
+          Web vitals datası bekleniyor.
+        </div>
+      ) : (
+        <div className="grid min-h-30 grid-cols-3 gap-4 pt-5 max-md:grid-cols-1">
+          {visibleVitals.map((vital) => (
+            <div key={vital.metric} className="rounded-xs bg-[#171a1a] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="font-mono text-[11px] font-bold tracking-[0.8px] text-[#8f9a99]">
+                  {vital.metric}
+                </h3>
+
+                <span
+                  className={`size-2 rounded-full ${
+                    vital.status === "warning" ? "bg-[#ffaaa4]" : "bg-[#5df6a8]"
+                  } shadow-[0_0_12px_currentColor]`}
+                />
+              </div>
+
+              <p
+                className={`text-[22px] font-bold tracking-[-0.7px] ${
+                  vital.status === "warning"
+                    ? "text-[#ffaaa4]"
+                    : "text-[#5df6a8]"
+                }`}
+              >
+                {vital.ours}
+              </p>
+
+              <div className="mt-3 space-y-1 font-mono text-[10px] font-bold text-[#6f7a79]">
+                <p>Ortalama: {vital.average}</p>
+                <p>Lider: {vital.leader}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </Panel>
   );
 }
@@ -636,7 +827,7 @@ function AiFlowCard({ jobs }: { jobs: AnalyzeListItem[] }) {
           <span className="text-[#6b28ff]">
             <AiIcon />
           </span>
-          AI ANALİZ AKIŞI
+          AKILLI ANALİZ AKIŞI
         </h2>
 
         <span className="rounded-xs border border-[#7d51bb] bg-[#3a2459] px-2 py-1 text-[10px] font-bold text-[#d9c7ff]">
@@ -704,56 +895,80 @@ function AiFlowCard({ jobs }: { jobs: AnalyzeListItem[] }) {
   );
 }
 
-function CompetitorCard() {
-  return (
-    <Panel className="h-75">
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-[13px] font-bold tracking-[1px] text-[#c2cbca]">
-          RAKİP KARŞILAŞTIRMASI
-        </h2>
+function SystemSummaryCard({ stats }: { stats: DashboardStats }) {
+  const items = [
+    {
+      label: "Toplam Analiz",
+      value: stats.total,
+      color: "text-[#70f8ff]",
+      bg: "bg-[#12393b]",
+    },
+    {
+      label: "Tamamlanan",
+      value: stats.completed,
+      color: "text-[#5df6a8]",
+      bg: "bg-[#143923]",
+    },
+    {
+      label: "Devam Eden",
+      value: stats.running,
+      color: "text-[#b997ff]",
+      bg: "bg-[#24113e]",
+    },
+    {
+      label: "Başarısız",
+      value: stats.failed,
+      color: "text-[#ffaaa4]",
+      bg: "bg-[#4a1515]",
+    },
+    {
+      label: "Fallback Rapor",
+      value: stats.fallback,
+      color: "text-[#18dce9]",
+      bg: "bg-[#12393b]",
+    },
+  ];
 
-        <a
-          href="#"
+  return (
+    <Panel className="min-h-75">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h2 className="text-[13px] font-bold tracking-[1px] text-[#c2cbca]">
+            ANALİZ DURUM ÖZETİ
+          </h2>
+
+          <p className="mt-1 font-mono text-[10px] font-bold text-[#626d6c]">
+            Gerçek analiz geçmişinden hesaplanır
+          </p>
+        </div>
+
+        <Link
+          href="/history"
           className="text-[12px] font-bold tracking-[0.3px] text-[#75f8ff]"
         >
           Detaylı Görünüm →
-        </a>
+        </Link>
       </div>
 
-      <table className="w-full text-left font-mono text-[12px] font-bold">
-        <thead className="text-[10px] text-[#596463]">
-          <tr className="border-b border-white/5">
-            <th className="pb-4">VARLIK</th>
-            <th className="pb-4">PAZAR PAYI</th>
-            <th className="pb-4">ÖZELLİK HIZI</th>
-            <th className="pb-4">AVANTAJIMIZ</th>
-          </tr>
-        </thead>
+      <div className="grid grid-cols-2 gap-3">
+        {items.map((item) => (
+          <div key={item.label} className="rounded-xs bg-[#171a1a] p-4">
+            <div
+              className={`mb-4 flex size-8 items-center justify-center rounded-xs ${item.bg} ${item.color}`}
+            >
+              <span className="size-2 rounded-full bg-current shadow-[0_0_12px_currentColor]" />
+            </div>
 
-        <tbody>
-          {competitors.map((row, index) => (
-            <tr key={row[0]} className="border-b border-white/3">
-              <td
-                className={`py-4 ${index === 0 ? "text-[#77f8ff]" : "text-[#8e9998]"}`}
-              >
-                {index === 0 && (
-                  <span className="mr-2 inline-block size-1.75 rounded-full bg-[#77f8ff]" />
-                )}
-                {row[0]}
-              </td>
-              <td className="py-4 text-[#a8b2b1]">{row[1]}</td>
-              <td className="py-4 text-[#8d9897]">{row[2]}</td>
-              <td
-                className={`py-4 ${
-                  row[3].includes("-4") ? "text-[#df8d8b]" : "text-[#63f2a8]"
-                }`}
-              >
-                {row[3]}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+            <p className="font-mono text-[10px] font-bold tracking-[0.8px] text-[#7d8786]">
+              {item.label}
+            </p>
+
+            <p className={`mt-2 text-[24px] font-bold ${item.color}`}>
+              {item.value}
+            </p>
+          </div>
+        ))}
+      </div>
     </Panel>
   );
 }
@@ -775,14 +990,17 @@ function AuditHistoryCard({
 }) {
   return (
     <Panel className="min-h-75">
-      <div className="mb-7 flex items-center justify-between">
+      <div className="mb-7 flex items-center justify-between gap-4">
         <h2 className="text-[13px] font-bold tracking-[1px] text-[#c2cbca]">
           SON DENETİM GEÇMİŞİ
         </h2>
 
-        <span className="text-[#8c9796]">
-          <RefreshIcon />
-        </span>
+        <Link
+          href="/history"
+          className="font-mono text-[10px] font-bold tracking-[0.7px] text-[#70f8ff] transition hover:text-white"
+        >
+          Tüm geçmişi görüntüle →
+        </Link>
       </div>
 
       <div className="space-y-6">
@@ -940,6 +1158,55 @@ function formatTimeAgo(timestamp: number) {
   }
 
   return `${Math.floor(diff / day)} gün önce`;
+}
+
+function formatScoreChange(value: number) {
+  if (value === 0) return "0";
+
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function buildTrendPath(values: number[]) {
+  const width = 600;
+  const height = 230;
+  const padding = 22;
+
+  if (!values.length) {
+    return {
+      linePath: "",
+      fillPath: "",
+      points: [],
+    };
+  }
+
+  const points = values.map((value, index) => {
+    const safeValue = Math.max(0, Math.min(100, value));
+    const x =
+      values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+    const y = padding + ((100 - safeValue) / 100) * (height - padding * 2);
+
+    return {
+      x: Math.round(x),
+      y: Math.round(y),
+    };
+  });
+
+  const linePath = points
+    .map((point, index) => {
+      return `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`;
+    })
+    .join(" ");
+
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+
+  const fillPath = `${linePath} L ${lastPoint.x} ${height} L ${firstPoint.x} ${height} Z`;
+
+  return {
+    linePath,
+    fillPath,
+    points,
+  };
 }
 
 /* Icons */
@@ -1240,19 +1507,6 @@ function AiIcon() {
         d="M12 3L19 7V17L12 21L5 17V7L12 3Z"
         fill="currentColor"
         opacity="0.85"
-      />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M20 12A8 8 0 1 1 17.7 6.4M20 4V10H14"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
       />
     </svg>
   );
